@@ -2,3 +2,5 @@ resources:
   - deployment.yaml
   - service.yaml
   - httproute.yaml
+configurations:
+  - name-reference.yaml
