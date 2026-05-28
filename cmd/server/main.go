@@ -36,6 +36,14 @@ func main() {
 		json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
 	})
 
+	mux.HandleFunc("GET /version", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]string{
+			"version": version,
+			"build":   "pr-preview-test",
+		})
+	})
+
 	srv := &http.Server{
 		Addr:         ":8080",
 		Handler:      mux,
