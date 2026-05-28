@@ -17,12 +17,12 @@ spec:
     spec:
       containers:
         - name: app-alpha
-          image: 829808296602.dkr.ecr.us-east-1.amazonaws.com/team-alpha/demo:latest
+          image: 829808296602.dkr.ecr.us-east-1.amazonaws.com/team-alpha/demo:e8a90a2379091f8603e186e25e658846f2156b74
           ports:
             - containerPort: 8080
           env:
             - name: VERSION
-              value: "latest"
+              value: "e8a90a2379091f8603e186e25e658846f2156b74"
             - name: NAMESPACE
               valueFrom:
                 fieldRef:
