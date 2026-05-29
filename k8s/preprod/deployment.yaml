@@ -5,6 +5,8 @@ metadata:
   namespace: team-alpha
   labels:
     app: app-alpha
+    app.kubernetes.io/name: app-alpha
+    team: alpha
 spec:
   replicas: 2
   selector:
@@ -14,7 +16,12 @@ spec:
     metadata:
       labels:
         app: app-alpha
+        app.kubernetes.io/name: app-alpha
+        team: alpha
     spec:
+      # App does not talk to the Kubernetes API — drop the SA token (least privilege).
+      # Required by the platform Kyverno policy restrict-automount-sa-token.
+      automountServiceAccountToken: false
       containers:
         - name: app-alpha
           image: 829808296602.dkr.ecr.us-east-1.amazonaws.com/team-alpha/demo:40295343a677e1c4cc4fbdf5f98ef2821bbedec4
