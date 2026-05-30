@@ -27,12 +27,12 @@ spec:
       automountServiceAccountToken: false
       containers:
         - name: app-alpha
-          image: 829808296602.dkr.ecr.us-east-1.amazonaws.com/team-alpha/demo@sha256:c38fff61f66b4cad6d8ec325b2d6e72820a23b0180b7bcb99f4db4e99f7725ab
+          image: 829808296602.dkr.ecr.us-east-1.amazonaws.com/team-alpha/demo@sha256:a5601f8dbf36d397c39cb836a98d06731e842fe306b34f39fe6a8b3ee1a8de3b
           ports:
             - containerPort: 8080
           env:
             - name: VERSION
-              value: "44ec482dfc63f986fb760e7f5d9894d1a7c9d0d9"
+              value: "72d3b93b18157aa80074c4d3694af96d14d137a0"
             - name: NAMESPACE
               valueFrom:
                 fieldRef:
@@ -40,9 +40,9 @@ spec:
             # Team S3 bucket (read via Pod Identity). AWS_REGION lets the SDK pick the endpoint; creds
             # come from the Pod Identity agent, not this config.
             - name: DATA_BUCKET
-              value: "asanexample-team-alpha-data"
+              value: "72d3b93b18157aa80074c4d3694af96d14d137a0"
             - name: AWS_REGION
-              value: "us-east-1"
+              value: "72d3b93b18157aa80074c4d3694af96d14d137a0"
           resources:
             requests:
               cpu: 100m
