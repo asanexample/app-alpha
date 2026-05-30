@@ -69,7 +69,10 @@ jobs:
         run: |
           IMAGE="${ECR_REGISTRY}/${ECR_REPO}@${{ steps.build.outputs.digest }}"
           syft "$IMAGE" -o cyclonedx-json=sbom.cdx.json
-          cosign attest --yes --type cyclonedx --predicate sbom.cdx.json "$IMAGE"
+          # OCI 1.1 referrers mode: each attestation is a separate referrer object
+          # (not aggregated under one mutable `.att` tag), so multiple attestations
+          # work on an immutable-tag ECR repo. See #108 deploy notes.
+          cosign attest --registry-referrers-mode oci-1-1 --yes --type cyclonedx --predicate sbom.cdx.json "$IMAGE"
 
       # SLSA build provenance (platform #108 / 108c). Records where/how the image was built —
       # source repo+commit, the workflow entrypoint, the builder, and the run — as a SLSA v0.2
@@ -111,7 +114,7 @@ jobs:
             ]
           }
           JSON
-          cosign attest --yes --type slsaprovenance --predicate provenance.json "$IMAGE"
+          cosign attest --registry-referrers-mode oci-1-1 --yes --type slsaprovenance --predicate provenance.json "$IMAGE"
 
       - name: Update manifests (pin to signed digest)
         run: |
