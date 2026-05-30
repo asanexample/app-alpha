@@ -41,7 +41,7 @@ docker run -p 8080:8080 -e VERSION=local -e NAMESPACE=dev app-alpha
 ## Architecture
 
 This repo is a tenant of the preprod EKS cluster managed by the
-[platform repo](https://github.com/gangster/platform). The platform
+[platform repo](https://github.com/asanexample/platform). The platform
 configures:
 
 - Namespace `team-alpha` with ResourceQuota, LimitRange, NetworkPolicy
