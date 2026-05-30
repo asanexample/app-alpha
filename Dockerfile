@@ -13,4 +13,9 @@ COPY --from=build /app /app
 
 EXPOSE 8080
 
+# Run as the distroless nonroot user explicitly (uid:gid 65532). The base already
+# defaults to nonroot, but an explicit USER makes it auditable and satisfies the
+# image-runs-as-root scanners (Trivy DS-0002 / Semgrep missing-user-entrypoint).
+USER 65532:65532
+
 ENTRYPOINT ["/app"]
