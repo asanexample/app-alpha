@@ -40,9 +40,9 @@ spec:
             # Team S3 bucket (read via Pod Identity). AWS_REGION lets the SDK pick the endpoint; creds
             # come from the Pod Identity agent, not this config.
             - name: DATA_BUCKET
-              value: "72d3b93b18157aa80074c4d3694af96d14d137a0"
+              value: "asanexample-team-alpha-data"
             - name: AWS_REGION
-              value: "72d3b93b18157aa80074c4d3694af96d14d137a0"
+              value: "us-east-1"
           resources:
             requests:
               cpu: 100m

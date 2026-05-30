@@ -52,7 +52,9 @@ jobs:
         run: |
           DIGEST="${{ steps.build.outputs.digest }}"
           sed -i "s|image: .*|image: ${ECR_REGISTRY}/${ECR_REPO}@${DIGEST}|" k8s/preprod/deployment.yaml
-          sed -i "s|value: \".*\"|value: \"${{ github.sha }}\"|" k8s/preprod/deployment.yaml
+          # Update ONLY the VERSION env value (the line after `- name: VERSION`). A bare
+          # `s|value: ".*"|...|` would clobber every other env value (DATA_BUCKET, AWS_REGION, ...).
+          sed -i "/- name: VERSION/{n;s|value: \".*\"|value: \"${{ github.sha }}\"|}" k8s/preprod/deployment.yaml
 
       - name: Commit and push manifest update
         run: |
