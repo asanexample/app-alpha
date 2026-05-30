@@ -71,6 +71,38 @@ jobs:
           syft "$IMAGE" -o cyclonedx-json=sbom.cdx.json
           cosign attest --yes --type cyclonedx --predicate sbom.cdx.json "$IMAGE"
 
+      # SLSA build provenance (platform #108 / 108c). Records where/how the image was built —
+      # source repo+commit, the workflow entrypoint, the builder, and the run — as a SLSA v0.2
+      # predicate, attached via cosign keyless (same format as the SBOM so Kyverno (#115) verifies
+      # both uniformly). The predicate uses only non-attacker-controllable build context.
+      - name: Generate + attest SLSA provenance (cosign keyless)
+        run: |
+          IMAGE="${ECR_REGISTRY}/${ECR_REPO}@${{ steps.build.outputs.digest }}"
+          SRC="git+${{ github.server_url }}/${{ github.repository }}@${{ github.ref }}"
+          cat > provenance.json <<JSON
+          {
+            "builder": { "id": "${{ github.server_url }}/${{ github.repository }}/.github/workflows/deploy.yml@${{ github.ref }}" },
+            "buildType": "https://github.com/asanexample/platform/build-types/github-actions-docker@v1",
+            "invocation": {
+              "configSource": {
+                "uri": "${SRC}",
+                "digest": { "sha1": "${{ github.sha }}" },
+                "entryPoint": ".github/workflows/deploy.yml"
+              },
+              "environment": { "github_run_id": "${{ github.run_id }}", "github_run_attempt": "${{ github.run_attempt }}" }
+            },
+            "metadata": {
+              "buildInvocationId": "${{ github.run_id }}-${{ github.run_attempt }}",
+              "completeness": { "parameters": true, "environment": false, "materials": false },
+              "reproducible": false
+            },
+            "materials": [
+              { "uri": "${SRC}", "digest": { "sha1": "${{ github.sha }}" } }
+            ]
+          }
+          JSON
+          cosign attest --yes --type slsaprovenance --predicate provenance.json "$IMAGE"
+
       - name: Update manifests (pin to signed digest)
         run: |
           DIGEST="${{ steps.build.outputs.digest }}"
