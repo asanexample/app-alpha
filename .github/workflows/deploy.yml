@@ -28,17 +28,31 @@ jobs:
       - name: Login to ECR
         uses: aws-actions/amazon-ecr-login@v2
 
-      - name: Build and push image
-        run: |
-          IMAGE_TAG="${{ github.sha }}"
-          docker build -t $ECR_REGISTRY/$ECR_REPO:$IMAGE_TAG .
-          docker push $ECR_REGISTRY/$ECR_REPO:$IMAGE_TAG
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
 
-      - name: Update manifests
+      - name: Build and push image
+        id: build
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          tags: ${{ env.ECR_REGISTRY }}/${{ env.ECR_REPO }}:${{ github.sha }}
+
+      - name: Install cosign
+        uses: sigstore/cosign-installer@v3
+
+      # Keyless signing via this workflow's GitHub OIDC identity (Fulcio + Rekor). Kyverno's
+      # verify-images policy admits only images signed by this exact workflow. Sign by DIGEST and
+      # BEFORE the manifest commit so the signature exists in ECR before ArgoCD admits the pod.
+      - name: Sign image (cosign keyless)
+        run: cosign sign --yes "${ECR_REGISTRY}/${ECR_REPO}@${{ steps.build.outputs.digest }}"
+
+      - name: Update manifests (pin to signed digest)
         run: |
-          IMAGE_TAG="${{ github.sha }}"
-          sed -i "s|image: .*|image: $ECR_REGISTRY/$ECR_REPO:$IMAGE_TAG|" k8s/preprod/deployment.yaml
-          sed -i "s|value: \".*\"|value: \"$IMAGE_TAG\"|" k8s/preprod/deployment.yaml
+          DIGEST="${{ steps.build.outputs.digest }}"
+          sed -i "s|image: .*|image: ${ECR_REGISTRY}/${ECR_REPO}@${DIGEST}|" k8s/preprod/deployment.yaml
+          sed -i "s|value: \".*\"|value: \"${{ github.sha }}\"|" k8s/preprod/deployment.yaml
 
       - name: Commit and push manifest update
         run: |
