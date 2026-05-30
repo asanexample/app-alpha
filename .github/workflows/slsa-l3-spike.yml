@@ -59,5 +59,10 @@ jobs:
       image: ${{ needs.build.outputs.image }}
       digest: ${{ needs.build.outputs.digest }}
       registry-username: AWS
+      private-repository: true
+    # DISAMBIGUATION: a static secret (not a masked job output). If the call now VALIDATES and the
+    # generator job STARTS (then fails at runtime on ECR auth, since this token is wrong), it proves the
+    # prior startup_failure was caused by forwarding the redacted ECR job-output as a reusable-wf secret
+    # — i.e. ECR's dynamic token cannot reach the off-the-shelf generator. (P0 contingency → custom wf.)
     secrets:
-      registry-password: ${{ needs.build.outputs.ecr_password }}
+      registry-password: ${{ secrets.GITHUB_TOKEN }}
