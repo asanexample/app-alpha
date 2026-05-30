@@ -71,6 +71,48 @@ jobs:
           syft "$IMAGE" -o cyclonedx-json=sbom.cdx.json
           cosign attest --yes --type cyclonedx --predicate sbom.cdx.json "$IMAGE"
 
+      # SLSA build provenance (platform #108 / 108c). Records where/how the image was built —
+      # source repo+commit, the workflow entrypoint, the builder, and the run — as a SLSA v0.2
+      # predicate, attached via cosign keyless (same format as the SBOM so Kyverno (#115) verifies
+      # both uniformly). The predicate uses only non-attacker-controllable build context.
+      - name: Generate + attest SLSA provenance (cosign keyless)
+        # ${{ }} via env (github.ref et al. are attacker-controllable) — avoids the
+        # shell-injection class (semgrep run-shell-injection), consistent with #112.
+        env:
+          DIGEST: ${{ steps.build.outputs.digest }}
+          SERVER_URL: ${{ github.server_url }}
+          REPO: ${{ github.repository }}
+          REF: ${{ github.ref }}
+          SHA: ${{ github.sha }}
+          RUN_ID: ${{ github.run_id }}
+          RUN_ATTEMPT: ${{ github.run_attempt }}
+        run: |
+          IMAGE="${ECR_REGISTRY}/${ECR_REPO}@${DIGEST}"
+          SRC="git+${SERVER_URL}/${REPO}@${REF}"
+          cat > provenance.json <<JSON
+          {
+            "builder": { "id": "${SERVER_URL}/${REPO}/.github/workflows/deploy.yml@${REF}" },
+            "buildType": "https://github.com/asanexample/platform/build-types/github-actions-docker@v1",
+            "invocation": {
+              "configSource": {
+                "uri": "${SRC}",
+                "digest": { "sha1": "${SHA}" },
+                "entryPoint": ".github/workflows/deploy.yml"
+              },
+              "environment": { "github_run_id": "${RUN_ID}", "github_run_attempt": "${RUN_ATTEMPT}" }
+            },
+            "metadata": {
+              "buildInvocationId": "${RUN_ID}-${RUN_ATTEMPT}",
+              "completeness": { "parameters": true, "environment": false, "materials": false },
+              "reproducible": false
+            },
+            "materials": [
+              { "uri": "${SRC}", "digest": { "sha1": "${SHA}" } }
+            ]
+          }
+          JSON
+          cosign attest --yes --type slsaprovenance --predicate provenance.json "$IMAGE"
+
       - name: Update manifests (pin to signed digest)
         run: |
           DIGEST="${{ steps.build.outputs.digest }}"
