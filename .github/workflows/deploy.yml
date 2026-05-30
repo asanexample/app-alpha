@@ -41,6 +41,11 @@ jobs:
 
       - name: Install cosign
         uses: sigstore/cosign-installer@v3
+        with:
+          # Pin cosign v2: legacy `.att` attestation format, which Kyverno's default attestor
+          # verifies. cosign v3's new bundle/referrers format needs Kyverno's opt-in
+          # `type: SigstoreBundle` — a separate, coordinated migration (#114 notes).
+          cosign-release: "v2.5.2"
 
       # Keyless signing via this workflow's GitHub OIDC identity (Fulcio + Rekor). Kyverno's
       # verify-images policy admits only images signed by this exact workflow. Sign by DIGEST and
@@ -71,12 +76,47 @@ jobs:
           syft "$IMAGE" -o cyclonedx-json=sbom.cdx.json
           cosign attest --yes --type cyclonedx --predicate sbom.cdx.json "$IMAGE"
 
-      # NOTE: SLSA provenance (108c / #114) is temporarily removed. cosign aggregates
-      # all attestations under one mutable `.att` tag, but the team ECR repos are
-      # IMMUTABLE, so a second `cosign attest` can't overwrite the tag — and cosign
-      # v2.5.2 has no `--registry-referrers-mode` flag to store attestations as
-      # separate referrers. #114 needs a proper design pass (correct cosign referrers
-      # invocation/version, or mutable-vs-immutable decision) — tracked in #114.
+      # SLSA build provenance (platform #108 / 108c). A second cosign attest on the same image —
+      # works now that the team ECR repos use IMMUTABLE_WITH_EXCLUSION (cosign's sha256-*.att tag
+      # is mutable so it can hold both attestations; image tags stay immutable — platform #114).
+      # Records where/how the image was built as a SLSA v0.2 predicate, keyless (legacy `.att`).
+      - name: Generate + attest SLSA provenance (cosign keyless)
+        # ${{ }} via env (github.ref et al. are attacker-controllable) — avoids the
+        # shell-injection class (semgrep run-shell-injection), consistent with #112.
+        env:
+          DIGEST: ${{ steps.build.outputs.digest }}
+          SERVER_URL: ${{ github.server_url }}
+          REPO: ${{ github.repository }}
+          REF: ${{ github.ref }}
+          SHA: ${{ github.sha }}
+          RUN_ID: ${{ github.run_id }}
+          RUN_ATTEMPT: ${{ github.run_attempt }}
+        run: |
+          IMAGE="${ECR_REGISTRY}/${ECR_REPO}@${DIGEST}"
+          SRC="git+${SERVER_URL}/${REPO}@${REF}"
+          cat > provenance.json <<JSON
+          {
+            "builder": { "id": "${SERVER_URL}/${REPO}/.github/workflows/deploy.yml@${REF}" },
+            "buildType": "https://github.com/asanexample/platform/build-types/github-actions-docker@v1",
+            "invocation": {
+              "configSource": {
+                "uri": "${SRC}",
+                "digest": { "sha1": "${SHA}" },
+                "entryPoint": ".github/workflows/deploy.yml"
+              },
+              "environment": { "github_run_id": "${RUN_ID}", "github_run_attempt": "${RUN_ATTEMPT}" }
+            },
+            "metadata": {
+              "buildInvocationId": "${RUN_ID}-${RUN_ATTEMPT}",
+              "completeness": { "parameters": true, "environment": false, "materials": false },
+              "reproducible": false
+            },
+            "materials": [
+              { "uri": "${SRC}", "digest": { "sha1": "${SHA}" } }
+            ]
+          }
+          JSON
+          cosign attest --yes --type slsaprovenance --predicate provenance.json "$IMAGE"
 
       - name: Update manifests (pin to signed digest)
         run: |
