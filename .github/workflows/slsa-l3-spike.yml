@@ -1,0 +1,63 @@
+name: SLSA L3 spike
+
+# P0 feasibility spike (platform #131): does slsa-github-generator's container generator work against
+# ECR with the build-yourself-then-pass-digest model? Builds a throwaway image, then calls the isolated
+# generator (its own OIDC identity) to attach a SLSA provenance. Throwaway — delete after the spike.
+on:
+  pull_request:
+    paths: [".github/workflows/slsa-l3-spike.yml"]
+
+permissions:
+  contents: read
+
+env:
+  ECR_REGISTRY: 829808296602.dkr.ecr.us-east-1.amazonaws.com
+  ECR_REPO: team-alpha/demo
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      contents: read
+    outputs:
+      image: ${{ env.ECR_REGISTRY }}/${{ env.ECR_REPO }}
+      digest: ${{ steps.build.outputs.digest }}
+      ecr_password: ${{ steps.pw.outputs.password }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::829808296602:role/github-actions-ecr-push-alpha
+          aws-region: us-east-1
+      - uses: aws-actions/amazon-ecr-login@v2
+      - uses: docker/setup-buildx-action@v3
+      - name: Build + push spike image (by digest)
+        id: build
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          tags: ${{ env.ECR_REGISTRY }}/${{ env.ECR_REPO }}:slsa-spike-${{ github.run_id }}
+      - name: Capture ECR token (masked) for the isolated generator
+        id: pw
+        run: |
+          PW=$(aws ecr get-login-password --region us-east-1)
+          echo "::add-mask::$PW"
+          echo "password=$PW" >> "$GITHUB_OUTPUT"
+
+  # The isolated trust domain: a reusable workflow with its OWN OIDC identity that the build job above
+  # cannot influence. It generates + cosign-signs the SLSA provenance and attaches it to the ECR image.
+  provenance:
+    needs: [build]
+    permissions:
+      id-token: write
+      contents: write
+      actions: read
+    uses: slsa-framework/slsa-github-generator/.github/workflows/generator_container_slsa3.yml@v2.1.0
+    with:
+      image: ${{ needs.build.outputs.image }}
+      digest: ${{ needs.build.outputs.digest }}
+      registry-username: AWS
+    secrets:
+      registry-password: ${{ needs.build.outputs.ecr_password }}
