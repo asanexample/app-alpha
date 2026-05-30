@@ -153,7 +153,7 @@ jobs:
     permissions:
       id-token: write
       contents: read
-    uses: asanexample/trusted-ci/.github/workflows/slsa-provenance.yml@5690ad323d109293289460f03b8ed5b6323eae69
+    uses: asanexample/trusted-ci/.github/workflows/slsa-provenance.yml@5e8a6b33515767cb80429d9e1831ab5143b5c477
     with:
       image: ${{ needs.build-and-deploy.outputs.image }}
       digest: ${{ needs.build-and-deploy.outputs.digest }}
