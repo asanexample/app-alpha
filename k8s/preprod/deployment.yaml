@@ -27,12 +27,12 @@ spec:
       automountServiceAccountToken: false
       containers:
         - name: app-alpha
-          image: 829808296602.dkr.ecr.us-east-1.amazonaws.com/team-alpha/demo@sha256:c8e60007f21c8ae797776c77cd7008f59b42a49fc5af8b9e68cecca97fdaa2c8
+          image: 829808296602.dkr.ecr.us-east-1.amazonaws.com/team-alpha/demo@sha256:f17ef3b286f630e973915aca893389d79f7156c9622b39bde3bf298c110605c1
           ports:
             - containerPort: 8080
           env:
             - name: VERSION
-              value: "3d7322fc2b2512bf16ad5c748fe195cf88a7ec54"
+              value: "8b67cf43de4bb372b24fc1cf892ddf4709c24b5d"
             - name: NAMESPACE
               valueFrom:
                 fieldRef:
