@@ -21,7 +21,7 @@ jobs:
       id-token: write
       contents: read
     outputs:
-      image: ${{ env.ECR_REGISTRY }}/${{ env.ECR_REPO }}
+      image: 829808296602.dkr.ecr.us-east-1.amazonaws.com/team-alpha/demo
       digest: ${{ steps.build.outputs.digest }}
       ecr_password: ${{ steps.pw.outputs.password }}
     steps:
