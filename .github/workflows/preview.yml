@@ -15,6 +15,11 @@ env:
 jobs:
   build:
     runs-on: ubuntu-latest
+    # Exposed for the isolated provenance job. `env` is not available in job `outputs:`, so the
+    # image ref is surfaced via a step output (steps.img).
+    outputs:
+      image: ${{ steps.img.outputs.image }}
+      digest: ${{ steps.build.outputs.digest }}
     steps:
       - uses: actions/checkout@v4
 
@@ -37,6 +42,10 @@ jobs:
           context: .
           push: true
           tags: ${{ env.ECR_REGISTRY }}/${{ env.ECR_REPO }}:${{ github.event.pull_request.head.sha }}
+
+      - name: Expose image ref for the provenance job
+        id: img
+        run: echo "image=${ECR_REGISTRY}/${ECR_REPO}" >> "$GITHUB_OUTPUT"
 
       - name: Install cosign
         uses: sigstore/cosign-installer@v3
@@ -107,3 +116,16 @@ jobs:
           }
           JSON
           cosign attest --yes --type slsaprovenance --predicate provenance.json "$IMAGE"
+
+  # SLSA Build L3 (platform #131, ADR-042): isolated provenance from trusted-ci, alongside the
+  # hand-authored one (dual provenance). The PR-preview run is also the empirical gate that the
+  # signer identity is trusted-ci (not app-alpha) before this lands on main.
+  provenance:
+    needs: build
+    permissions:
+      id-token: write
+      contents: read
+    uses: asanexample/trusted-ci/.github/workflows/slsa-provenance.yml@10a29f41c20ec30d3e1b2665d98e5656a9a4553f
+    with:
+      image: ${{ needs.build.outputs.image }}
+      digest: ${{ needs.build.outputs.digest }}
