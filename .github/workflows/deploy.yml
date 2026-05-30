@@ -76,28 +76,38 @@ jobs:
       # predicate, attached via cosign keyless (same format as the SBOM so Kyverno (#115) verifies
       # both uniformly). The predicate uses only non-attacker-controllable build context.
       - name: Generate + attest SLSA provenance (cosign keyless)
+        # ${{ }} via env (github.ref et al. are attacker-controllable) — avoids the
+        # shell-injection class (semgrep run-shell-injection), consistent with #112.
+        env:
+          DIGEST: ${{ steps.build.outputs.digest }}
+          SERVER_URL: ${{ github.server_url }}
+          REPO: ${{ github.repository }}
+          REF: ${{ github.ref }}
+          SHA: ${{ github.sha }}
+          RUN_ID: ${{ github.run_id }}
+          RUN_ATTEMPT: ${{ github.run_attempt }}
         run: |
-          IMAGE="${ECR_REGISTRY}/${ECR_REPO}@${{ steps.build.outputs.digest }}"
-          SRC="git+${{ github.server_url }}/${{ github.repository }}@${{ github.ref }}"
+          IMAGE="${ECR_REGISTRY}/${ECR_REPO}@${DIGEST}"
+          SRC="git+${SERVER_URL}/${REPO}@${REF}"
           cat > provenance.json <<JSON
           {
-            "builder": { "id": "${{ github.server_url }}/${{ github.repository }}/.github/workflows/deploy.yml@${{ github.ref }}" },
+            "builder": { "id": "${SERVER_URL}/${REPO}/.github/workflows/deploy.yml@${REF}" },
             "buildType": "https://github.com/asanexample/platform/build-types/github-actions-docker@v1",
             "invocation": {
               "configSource": {
                 "uri": "${SRC}",
-                "digest": { "sha1": "${{ github.sha }}" },
+                "digest": { "sha1": "${SHA}" },
                 "entryPoint": ".github/workflows/deploy.yml"
               },
-              "environment": { "github_run_id": "${{ github.run_id }}", "github_run_attempt": "${{ github.run_attempt }}" }
+              "environment": { "github_run_id": "${RUN_ID}", "github_run_attempt": "${RUN_ATTEMPT}" }
             },
             "metadata": {
-              "buildInvocationId": "${{ github.run_id }}-${{ github.run_attempt }}",
+              "buildInvocationId": "${RUN_ID}-${RUN_ATTEMPT}",
               "completeness": { "parameters": true, "environment": false, "materials": false },
               "reproducible": false
             },
             "materials": [
-              { "uri": "${SRC}", "digest": { "sha1": "${{ github.sha }}" } }
+              { "uri": "${SRC}", "digest": { "sha1": "${SHA}" } }
             ]
           }
           JSON
