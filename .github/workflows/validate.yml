@@ -1,0 +1,18 @@
+name: Validate manifests
+
+# Shift-left Kyverno policy gate (platform ADR-014 Phase 4). Renders the platform tenant policies and
+# checks this app's manifests against them, failing the PR before merge — the same checks admission
+# enforces in-cluster. Cluster-free; no AWS creds/secrets. Admission remains the enforcement point.
+on:
+  pull_request:
+
+jobs:
+  kyverno:
+    name: Kyverno shift-left
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: asanexample/platform/.github/actions/kyverno-validate@main
+        with:
+          team: alpha
+          manifests-path: k8s/preprod
