@@ -58,8 +58,9 @@ jobs:
       - name: Sign image (cosign keyless)
         run: cosign sign --yes "${ECR_REGISTRY}/${ECR_REPO}@${{ steps.build.outputs.digest }}"
 
-      # SBOM + SLSA provenance attestations (platform #108 / 108b+108c) — same as deploy.yml, so PR
-      # previews satisfy the verify-attestations policy (which matches preview.yml by subjectRegExp).
+      # SBOM attestation (platform #108 / 108b) — same as deploy.yml, so PR previews satisfy the
+      # verify-attestations SBOM requirement (the policy matches preview.yml by subjectRegExp).
+      # Provenance is produced by the isolated trusted-ci `provenance:` job below, not here.
       - name: Install Syft (download release binary + verify SHA-256)
         env:
           SYFT_VERSION: "1.44.0" # latest stable; verify before bumping
@@ -80,46 +81,10 @@ jobs:
           syft "$IMAGE" -o cyclonedx-json=sbom.cdx.json
           cosign attest --yes --type cyclonedx --predicate sbom.cdx.json "$IMAGE"
 
-      - name: Generate + attest SLSA provenance (cosign keyless)
-        # ${{ }} via env (github.ref et al. are attacker-controllable) — avoids shell injection (#112).
-        env:
-          DIGEST: ${{ steps.build.outputs.digest }}
-          SERVER_URL: ${{ github.server_url }}
-          REPO: ${{ github.repository }}
-          REF: ${{ github.ref }}
-          SHA: ${{ github.sha }}
-          RUN_ID: ${{ github.run_id }}
-          RUN_ATTEMPT: ${{ github.run_attempt }}
-        run: |
-          IMAGE="${ECR_REGISTRY}/${ECR_REPO}@${DIGEST}"
-          SRC="git+${SERVER_URL}/${REPO}@${REF}"
-          cat > provenance.json <<JSON
-          {
-            "builder": { "id": "${SERVER_URL}/${REPO}/.github/workflows/preview.yml@${REF}" },
-            "buildType": "https://github.com/asanexample/platform/build-types/github-actions-docker@v1",
-            "invocation": {
-              "configSource": {
-                "uri": "${SRC}",
-                "digest": { "sha1": "${SHA}" },
-                "entryPoint": ".github/workflows/preview.yml"
-              },
-              "environment": { "github_run_id": "${RUN_ID}", "github_run_attempt": "${RUN_ATTEMPT}" }
-            },
-            "metadata": {
-              "buildInvocationId": "${RUN_ID}-${RUN_ATTEMPT}",
-              "completeness": { "parameters": true, "environment": false, "materials": false },
-              "reproducible": false
-            },
-            "materials": [
-              { "uri": "${SRC}", "digest": { "sha1": "${SHA}" } }
-            ]
-          }
-          JSON
-          cosign attest --yes --type slsaprovenance --predicate provenance.json "$IMAGE"
-
-  # SLSA Build L3 (platform #131, ADR-042): isolated provenance from trusted-ci, alongside the
-  # hand-authored one (dual provenance). The PR-preview run is also the empirical gate that the
-  # signer identity is trusted-ci (not app-alpha) before this lands on main.
+  # SLSA Build L3 (platform #131, ADR-042): the SOLE provenance attestation for preview images,
+  # signed by the isolated asanexample/trusted-ci reusable workflow. The preview build no longer
+  # hand-authors provenance (single trusted-ci identity — see deploy.yml). This PR-preview run is
+  # also the empirical gate that the signer identity is trusted-ci before the change lands on main.
   provenance:
     needs: build
     permissions:

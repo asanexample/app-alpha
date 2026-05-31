@@ -13,10 +13,13 @@ env:
   ECR_REPO: team-alpha/demo
 
 jobs:
-  build-and-deploy:
+  build:
     runs-on: ubuntu-latest
     if: "!startsWith(github.event.head_commit.message, 'deploy:')"
-    # Exposed for the isolated provenance job. NOTE: workflow-level `env` is NOT available in
+    permissions:
+      id-token: write # OIDC: AWS (ECR push) + cosign keyless signing
+      contents: read
+    # Surfaced to the provenance + deploy jobs. NOTE: workflow-level `env` is NOT available in
     # job `outputs:`, so the image ref is surfaced via a step output (steps.img), not ${{ env.* }}.
     outputs:
       image: ${{ steps.img.outputs.image }}
@@ -44,7 +47,7 @@ jobs:
           push: true
           tags: ${{ env.ECR_REGISTRY }}/${{ env.ECR_REPO }}:${{ github.sha }}
 
-      - name: Expose image ref for the provenance job
+      - name: Expose image ref for the provenance + deploy jobs
         id: img
         run: echo "image=${ECR_REGISTRY}/${ECR_REPO}" >> "$GITHUB_OUTPUT"
 
@@ -57,14 +60,13 @@ jobs:
           cosign-release: "v2.5.2"
 
       # Keyless signing via this workflow's GitHub OIDC identity (Fulcio + Rekor). Kyverno's
-      # verify-images policy admits only images signed by this exact workflow. Sign by DIGEST and
-      # BEFORE the manifest commit so the signature exists in ECR before ArgoCD admits the pod.
+      # verify-images policy admits only images signed by this exact workflow. Sign by DIGEST.
       - name: Sign image (cosign keyless)
         run: cosign sign --yes "${ECR_REGISTRY}/${ECR_REPO}@${{ steps.build.outputs.digest }}"
 
       # Software Bill of Materials (platform #108 / 108b). Syft generates a CycloneDX SBOM from
       # the pushed image; cosign attaches it as a keyless-signed attestation (same OIDC identity
-      # as the signature). Kyverno's verify-attestation policy (#115) will require it at admission.
+      # as the signature). Kyverno's verify-attestations policy requires the SBOM at admission.
       - name: Install Syft (download release binary + verify SHA-256)
         env:
           SYFT_VERSION: "1.44.0" # latest stable; verify before bumping
@@ -85,52 +87,39 @@ jobs:
           syft "$IMAGE" -o cyclonedx-json=sbom.cdx.json
           cosign attest --yes --type cyclonedx --predicate sbom.cdx.json "$IMAGE"
 
-      # SLSA build provenance (platform #108 / 108c). A second cosign attest on the same image —
-      # works now that the team ECR repos use IMMUTABLE_WITH_EXCLUSION (cosign's sha256-*.att tag
-      # is mutable so it can hold both attestations; image tags stay immutable — platform #114).
-      # Records where/how the image was built as a SLSA v0.2 predicate, keyless (legacy `.att`).
-      - name: Generate + attest SLSA provenance (cosign keyless)
-        # ${{ }} via env (github.ref et al. are attacker-controllable) — avoids the
-        # shell-injection class (semgrep run-shell-injection), consistent with #112.
-        env:
-          DIGEST: ${{ steps.build.outputs.digest }}
-          SERVER_URL: ${{ github.server_url }}
-          REPO: ${{ github.repository }}
-          REF: ${{ github.ref }}
-          SHA: ${{ github.sha }}
-          RUN_ID: ${{ github.run_id }}
-          RUN_ATTEMPT: ${{ github.run_attempt }}
-        run: |
-          IMAGE="${ECR_REGISTRY}/${ECR_REPO}@${DIGEST}"
-          SRC="git+${SERVER_URL}/${REPO}@${REF}"
-          cat > provenance.json <<JSON
-          {
-            "builder": { "id": "${SERVER_URL}/${REPO}/.github/workflows/deploy.yml@${REF}" },
-            "buildType": "https://github.com/asanexample/platform/build-types/github-actions-docker@v1",
-            "invocation": {
-              "configSource": {
-                "uri": "${SRC}",
-                "digest": { "sha1": "${SHA}" },
-                "entryPoint": ".github/workflows/deploy.yml"
-              },
-              "environment": { "github_run_id": "${RUN_ID}", "github_run_attempt": "${RUN_ATTEMPT}" }
-            },
-            "metadata": {
-              "buildInvocationId": "${RUN_ID}-${RUN_ATTEMPT}",
-              "completeness": { "parameters": true, "environment": false, "materials": false },
-              "reproducible": false
-            },
-            "materials": [
-              { "uri": "${SRC}", "digest": { "sha1": "${SHA}" } }
-            ]
-          }
-          JSON
-          cosign attest --yes --type slsaprovenance --predicate provenance.json "$IMAGE"
+  # SLSA Build L3 (platform #131, ADR-042): the SOLE provenance attestation, signed by the isolated
+  # asanexample/trusted-ci reusable workflow whose identity this app's build job cannot forge. The
+  # app no longer hand-authors provenance — a job signing provenance it wrote about itself proves
+  # nothing, and a second slsaprovenance attestation of a different identity breaks Kyverno's
+  # single-identity attestation match (verifiedCount:0). trusted-ci is now the only provenance source.
+  provenance:
+    needs: build
+    permissions:
+      id-token: write
+      contents: read
+    uses: asanexample/trusted-ci/.github/workflows/slsa-provenance.yml@5e8a6b33515767cb80429d9e1831ab5143b5c477
+    with:
+      image: ${{ needs.build.outputs.image }}
+      digest: ${{ needs.build.outputs.digest }}
+
+  # Pin the deploy manifest to the freshly-built digest and commit. Gated on BOTH build and
+  # provenance so the digest ArgoCD picks up already carries its signature, SBOM AND trusted-ci
+  # provenance — there is no window where ArgoCD sees an image whose provenance attestation does not
+  # yet exist, which is what would otherwise make Kyverno's Enforce verify-attestations reject it.
+  deploy:
+    needs: [build, provenance]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
 
       - name: Update manifests (pin to signed digest)
+        env:
+          IMAGE: ${{ needs.build.outputs.image }}
+          DIGEST: ${{ needs.build.outputs.digest }}
         run: |
-          DIGEST="${{ steps.build.outputs.digest }}"
-          sed -i "s|image: .*|image: ${ECR_REGISTRY}/${ECR_REPO}@${DIGEST}|" k8s/preprod/deployment.yaml
+          sed -i "s|image: .*|image: ${IMAGE}@${DIGEST}|" k8s/preprod/deployment.yaml
           # Update ONLY the VERSION env value (the line after `- name: VERSION`). A bare
           # `s|value: ".*"|...|` would clobber every other env value (DATA_BUCKET, AWS_REGION, ...).
           sed -i "/- name: VERSION/{n;s|value: \".*\"|value: \"${{ github.sha }}\"|}" k8s/preprod/deployment.yaml
@@ -142,18 +131,3 @@ jobs:
           git add k8s/preprod/deployment.yaml
           git diff --cached --quiet || git commit -m "deploy: update image to ${{ github.sha }}"
           git push
-
-  # SLSA Build L3 (platform #131, ADR-042): a SECOND provenance attestation, signed by the
-  # isolated trusted-ci signer whose identity this build job cannot forge. The hand-authored
-  # step above stays for now (dual provenance) so admission never breaks mid-transition; Kyverno
-  # swaps to the trusted-ci identity in P2/P3. This job is non-blocking — the image is already
-  # pushed, signed and the manifest committed above, so a signer hiccup can't block the deploy.
-  provenance:
-    needs: build-and-deploy
-    permissions:
-      id-token: write
-      contents: read
-    uses: asanexample/trusted-ci/.github/workflows/slsa-provenance.yml@5e8a6b33515767cb80429d9e1831ab5143b5c477
-    with:
-      image: ${{ needs.build-and-deploy.outputs.image }}
-      digest: ${{ needs.build-and-deploy.outputs.digest }}
