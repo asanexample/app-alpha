@@ -3,3 +3,6 @@ resources:
   - deployment.yaml
   - service.yaml
   - httproute.yaml
+# Rewrite HTTPRoute backendRefs when a namePrefix is applied (PR previews). See name-reference.yaml.
+configurations:
+  - name-reference.yaml
