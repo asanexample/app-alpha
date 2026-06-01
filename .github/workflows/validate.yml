@@ -18,50 +18,14 @@ jobs:
           manifests-path: k8s/preprod
 
   # Regression guard for platform issue #155 (ADR-032): PR preview environments apply a kustomize
-  # `namePrefix` (pr-<N>-) to isolate resources. Gateway API HTTPRoute is a CRD, so without the
-  # name-reference.yaml config the prefixed preview HTTPRoute keeps pointing at the UN-prefixed
-  # (stable) Service — silently serving stable pods under a preview URL. This renders the overlay the
-  # way ArgoCD does and fails if any HTTPRoute backendRef is not rewritten to the prefixed Service.
+  # `namePrefix` (pr-<N>-). Gateway API HTTPRoute is a CRD, so without name-reference.yaml the
+  # prefixed preview HTTPRoute keeps pointing at the UN-prefixed (stable) Service. The shared action
+  # renders the overlay the way ArgoCD does and fails if any backendRef isn't rewritten.
   preview-routing:
     name: Preview routing (backendRef rewrite)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: azure/setup-kubectl@v4
-      - name: Assert HTTPRoute backendRefs follow namePrefix
-        shell: bash
-        run: |
-          set -euo pipefail
-          prefix="pr-citest-"
-          work="$(mktemp -d)"
-          cp k8s/preprod/*.yaml "$work/"
-          # Simulate ArgoCD's PR-preview transform: prepend a namePrefix to the app's kustomization.
-          { printf 'namePrefix: %s\n' "$prefix"; cat k8s/preprod/kustomization.yaml; } > "$work/kustomization.yaml"
-          kubectl kustomize "$work" > "$work/rendered.yaml"
-          python3 -c "import yaml" 2>/dev/null || pip3 install --quiet pyyaml
-          python3 - "$work/rendered.yaml" "$prefix" <<'PY'
-          import sys, yaml
-          rendered, prefix = sys.argv[1], sys.argv[2]
-          docs = [d for d in yaml.safe_load_all(open(rendered)) if d]
-          bad = []
-          seen = 0
-          for d in docs:
-              if d.get("kind") != "HTTPRoute":
-                  continue
-              for rule in (d.get("spec", {}).get("rules") or []):
-                  for ref in (rule.get("backendRefs") or []):
-                      seen += 1
-                      name = ref.get("name", "")
-                      if not name.startswith(prefix):
-                          bad.append((d["metadata"]["name"], name))
-          if bad:
-              print("FAIL: HTTPRoute backendRef(s) not rewritten under namePrefix "
-                    "(missing name-reference.yaml? see platform #155):")
-              for route, ref in bad:
-                  print(f"  route {route}: backendRef -> {ref!r} (expected prefix {prefix!r})")
-              sys.exit(1)
-          if seen == 0:
-              print("WARN: no HTTPRoute backendRefs found to check")
-          else:
-              print(f"OK: {seen} HTTPRoute backendRef(s) correctly carry the {prefix!r} preview prefix")
-          PY
+      - uses: asanexample/platform/.github/actions/preview-routing-check@main
+        with:
+          manifests-path: k8s/preprod
