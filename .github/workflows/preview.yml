@@ -1,5 +1,10 @@
 name: PR Preview
 
+# Thin caller (same shared build-sign + slsa-provenance siblings as deploy.yml, but no deploy/commit job).
+# Builds + signs + provenances a PR image so previews satisfy the same Kyverno verify-images /
+# verify-attestations checks (alpha has preview: true, so the preview ApplicationSet deploys these).
+# Fork PRs get no OIDC token, so they fail closed (cannot push) — by design.
+
 on:
   pull_request:
     types: [opened, synchronize]
@@ -8,89 +13,22 @@ permissions:
   id-token: write
   contents: read
 
-env:
-  ECR_REGISTRY: 829808296602.dkr.ecr.us-east-1.amazonaws.com
-  ECR_REPO: team-alpha/demo
-
 jobs:
   build:
-    runs-on: ubuntu-latest
-    # Exposed for the isolated provenance job. `env` is not available in job `outputs:`, so the
-    # image ref is surfaced via a step output (steps.img).
-    outputs:
-      image: ${{ steps.img.outputs.image }}
-      digest: ${{ steps.build.outputs.digest }}
-    steps:
-      - uses: actions/checkout@v4
+    permissions:
+      id-token: write
+      contents: read
+    uses: asanexample/trusted-ci/.github/workflows/build-sign.yml@70fc4ba48c7aa66e988ca2d30c2327a2d98f49e7
+    with:
+      app: demo
+      tag: ${{ github.event.pull_request.head.sha }}
 
-      - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v4
-        with:
-          role-to-assume: arn:aws:iam::829808296602:role/github-actions-ecr-push-alpha
-          aws-region: us-east-1
-
-      - name: Login to ECR
-        uses: aws-actions/amazon-ecr-login@v2
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-
-      - name: Build and push image
-        id: build
-        uses: docker/build-push-action@v6
-        with:
-          context: .
-          push: true
-          tags: ${{ env.ECR_REGISTRY }}/${{ env.ECR_REPO }}:${{ github.event.pull_request.head.sha }}
-
-      - name: Expose image ref for the provenance job
-        id: img
-        run: echo "image=${ECR_REGISTRY}/${ECR_REPO}" >> "$GITHUB_OUTPUT"
-
-      - name: Install cosign
-        uses: sigstore/cosign-installer@v3
-        with:
-          # Pin cosign v2 (legacy `.att` format Kyverno's default attestor verifies) — same as deploy.yml.
-          cosign-release: "v2.5.2"
-
-      # Keyless signing via this PR workflow's GitHub OIDC identity. The verify-images policy matches
-      # preview.yml by subjectRegExp (the OIDC ref differs per PR), so previews verify too.
-      - name: Sign image (cosign keyless)
-        run: cosign sign --yes "${ECR_REGISTRY}/${ECR_REPO}@${{ steps.build.outputs.digest }}"
-
-      # SBOM attestation (platform #108 / 108b) — same as deploy.yml, so PR previews satisfy the
-      # verify-attestations SBOM requirement (the policy matches preview.yml by subjectRegExp).
-      # Provenance is produced by the isolated trusted-ci `provenance:` job below, not here.
-      - name: Install Syft (download release binary + verify SHA-256)
-        env:
-          SYFT_VERSION: "1.44.0" # latest stable; verify before bumping
-        run: |
-          base="https://github.com/anchore/syft/releases/download/v${SYFT_VERSION}"
-          asset="syft_${SYFT_VERSION}_linux_amd64.tar.gz"
-          curl -sfL "${base}/${asset}" -o "${asset}"
-          curl -sfL "${base}/syft_${SYFT_VERSION}_checksums.txt" -o syft_checksums.txt
-          grep " ${asset}\$" syft_checksums.txt | sha256sum -c -
-          tar xzf "${asset}" syft
-          sudo install -m 0755 syft /usr/local/bin/syft
-          rm -f syft "${asset}" syft_checksums.txt
-          syft --version
-
-      - name: Generate + attest SBOM (CycloneDX, cosign keyless)
-        run: |
-          IMAGE="${ECR_REGISTRY}/${ECR_REPO}@${{ steps.build.outputs.digest }}"
-          syft "$IMAGE" -o cyclonedx-json=sbom.cdx.json
-          cosign attest --yes --type cyclonedx --predicate sbom.cdx.json "$IMAGE"
-
-  # SLSA Build L3 (platform #131, ADR-042): the SOLE provenance attestation for preview images,
-  # signed by the isolated asanexample/trusted-ci reusable workflow. The preview build no longer
-  # hand-authors provenance (single trusted-ci identity — see deploy.yml). This PR-preview run is
-  # also the empirical gate that the signer identity is trusted-ci before the change lands on main.
   provenance:
     needs: build
     permissions:
       id-token: write
       contents: read
-    uses: asanexample/trusted-ci/.github/workflows/slsa-provenance.yml@5e8a6b33515767cb80429d9e1831ab5143b5c477
+    uses: asanexample/trusted-ci/.github/workflows/slsa-provenance.yml@70fc4ba48c7aa66e988ca2d30c2327a2d98f49e7
     with:
       image: ${{ needs.build.outputs.image }}
       digest: ${{ needs.build.outputs.digest }}
