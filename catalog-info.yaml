@@ -1,0 +1,14 @@
+apiVersion: backstage.io/v1alpha1
+kind: Component
+metadata:
+  name: app-alpha
+  description: Team alpha's demo service
+  annotations:
+    github.com/project-slug: asanexample/app-alpha
+    argocd/app-name: alpha-demo
+    backstage.io/kubernetes-label-selector: app.kubernetes.io/name=app-alpha
+    backstage.io/kubernetes-namespace: team-alpha
+spec:
+  type: service
+  lifecycle: production
+  owner: alpha
