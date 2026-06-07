@@ -1,11 +1,14 @@
-FROM golang:1.24-alpine AS build
+FROM --platform=$BUILDPLATFORM golang:1.24-alpine AS build
 
 WORKDIR /src
 COPY go.mod go.sum ./
 RUN go mod download
 COPY cmd/ cmd/
 
-RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-s -w" -o /app ./cmd/server
+# Cross-compile to the target arch (buildx sets TARGETOS/TARGETARCH) so multi-arch builds run on the native
+# (amd64) toolchain with no QEMU emulation — Go cross-compiles for free.
+ARG TARGETOS TARGETARCH
+RUN CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} go build -ldflags="-s -w" -o /app ./cmd/server
 
 FROM gcr.io/distroless/static-debian12:nonroot
 
