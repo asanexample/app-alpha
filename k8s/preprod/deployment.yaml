@@ -2,7 +2,7 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: app-alpha
-  namespace: team-alpha
+  namespace: alpha-demo-dev
   labels:
     app: app-alpha
     app.kubernetes.io/name: app-alpha
