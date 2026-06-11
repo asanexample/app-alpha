@@ -29,3 +29,27 @@ jobs:
       - uses: asanexample/platform/.github/actions/preview-routing-check@main
         with:
           manifests-path: k8s/preprod
+
+  # v3 layout guard (ADR-067 #376): the per-Product ApplicationSet syncs k8s/overlays/<stage> and injects the
+  # namespace + host. Assert every stage overlay BUILDS and the base stays namespace-/host-agnostic (no
+  # metadata.namespace; the placeholder host is the only one) and the image is product-scoped (team-alpha/demo-*).
+  # Additive alongside the v2 k8s/preprod jobs above; both layouts coexist until the cutover removes preprod/.
+  overlays-build:
+    name: v3 overlays build (ns-agnostic)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build each stage overlay
+        run: |
+          set -euo pipefail
+          rc=0
+          for s in dev test uat staging prod; do
+            out="$(kubectl kustomize "k8s/overlays/$s")" || { echo "::error::overlays/$s failed to build"; rc=1; continue; }
+            if printf '%s' "$out" | grep -qE '^  namespace: '; then
+              echo "::error::overlays/$s: a resource has a hardcoded metadata.namespace (must be ns-agnostic)"; rc=1
+            fi
+            printf '%s' "$out" | grep -q 'placeholder.invalid' || { echo "::error::overlays/$s: HTTPRoute host placeholder missing"; rc=1; }
+            printf '%s' "$out" | grep -qE 'image: .*/team-alpha/demo-[a-z0-9-]+' || { echo "::error::overlays/$s: image is not product-scoped team-alpha/demo-<service>"; rc=1; }
+            echo "overlays/$s: built"
+          done
+          exit $rc
