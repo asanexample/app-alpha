@@ -49,3 +49,11 @@ configures:
 - ArgoCD ApplicationSet for PR previews
 - ECR repository `team-alpha/demo` with cross-account pull
 - GitHub OIDC role for ECR push
+
+### v3 layout (ADR-067)
+
+`k8s/base/` + `k8s/overlays/<stage>/` is the going-forward shape: a namespace-/host-agnostic `base/` and
+thin per-stage overlays (`dev`/`test`/`uat`/`staging`/`prod`). The per-Product ApplicationSet syncs
+`k8s/overlays/<stage>`, sets the destination namespace, and patches the real host onto the `HTTPRoute`; each
+overlay pins the per-stage image digest (product-scoped `team-alpha/demo-web`). `k8s/preprod/` is the legacy
+v2 layout, retained until the cutover removes it.

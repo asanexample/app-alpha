@@ -1,0 +1,64 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: app-alpha
+  labels:
+    app: app-alpha
+    app.kubernetes.io/name: app-alpha
+    team: alpha
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: app-alpha
+  template:
+    metadata:
+      labels:
+        app: app-alpha
+        app.kubernetes.io/name: app-alpha
+        team: alpha
+    spec:
+      # Pod Identity binds AWS creds to this named SA (platform association, ADR-041). In v3 the access is
+      # declared in the Environment claim's services.<svc>.permissions.aws — never an IRSA annotation here.
+      serviceAccountName: app-alpha
+      # App does not talk to the Kubernetes API — drop the SA token (least privilege). Pod Identity injects
+      # its OWN projected token, so this does not affect AWS access. Required by restrict-automount-sa-token.
+      automountServiceAccountToken: false
+      containers:
+        - name: app-alpha
+          # Product-scoped ECR image (v3: team-<team>/<product>-<service>). The :placeholder tag is the
+          # pre-first-deploy seed; each overlay's `images:` pins the signed digest CI promotes per stage
+          # (promote-by-PR, #377). restrict-images admits team-alpha/demo-* (the product's repos).
+          image: 829808296602.dkr.ecr.us-east-1.amazonaws.com/team-alpha/demo-web:placeholder
+          ports:
+            - containerPort: 8080
+          env:
+            - name: NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+            # Team S3 bucket (read via Pod Identity). AWS_REGION lets the SDK pick the endpoint; creds
+            # come from the Pod Identity agent, not this config.
+            - name: DATA_BUCKET
+              value: "asanexample-team-alpha-data"
+            - name: AWS_REGION
+              value: "us-east-1"
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: 8080
+            initialDelaySeconds: 5
+            periodSeconds: 15
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: 8080
+            initialDelaySeconds: 3
+            periodSeconds: 10
