@@ -28,32 +28,27 @@ docker run -p 8080:8080 -e VERSION=local -e NAMESPACE=dev app-alpha
 ## Deployment
 
 **Main branch** pushes trigger `.github/workflows/deploy.yml`:
-1. Build and push image to ECR (`team-alpha/demo:<sha>`)
-2. Update `k8s/preprod/deployment.yaml` with new image tag
-3. ArgoCD auto-syncs to preprod cluster
+1. Build, push + sign the image to ECR (`team-alpha/demo-web`, product-scoped)
+2. Pin the signed digest into `k8s/overlays/dev/kustomization.yaml` (`images[].digest`)
+3. The per-Product ApplicationSet syncs it to the cluster (promotion to other stages is by PR)
 
-**Pull requests** trigger `.github/workflows/preview.yml`:
-1. Build and push image to ECR (`team-alpha/demo:<head-sha>`)
-2. ArgoCD ApplicationSet detects open PR and creates preview deployment
-3. Preview available at `demo-pr-<N>.preprod.aws.refplat.org`
-4. Closing the PR auto-deletes the preview
+**Pull requests** trigger `.github/workflows/preview.yml` (builds + signs the image; the v3 PR-preview
+delivery is a separate enhancement).
 
 ## Architecture
 
 This repo is a tenant of the preprod EKS cluster managed by the
 [platform repo](https://github.com/asanexample/platform). The platform
-configures:
+configures (ADR-067):
 
-- Namespace `team-alpha` with ResourceQuota, LimitRange, NetworkPolicy
-- ArgoCD Application pointing at `k8s/preprod/`
-- ArgoCD ApplicationSet for PR previews
-- ECR repository `team-alpha/demo` with cross-account pull
-- GitHub OIDC role for ECR push
+- The Environment namespace (`<team>-<product>-<stage>`) with ResourceQuota, LimitRange, NetworkPolicy
+- The per-Product ArgoCD ApplicationSet pointing at `k8s/overlays/<stage>`
+- ECR repository `team-alpha/demo-web` (product-scoped) with cross-account pull
+- A per-Product GitHub OIDC role for ECR push
 
-### v3 layout (ADR-067)
+### Layout (ADR-067)
 
-`k8s/base/` + `k8s/overlays/<stage>/` is the going-forward shape: a namespace-/host-agnostic `base/` and
-thin per-stage overlays (`dev`/`test`/`uat`/`staging`/`prod`). The per-Product ApplicationSet syncs
-`k8s/overlays/<stage>`, sets the destination namespace, and patches the real host onto the `HTTPRoute`; each
-overlay pins the per-stage image digest (product-scoped `team-alpha/demo-web`). `k8s/preprod/` is the legacy
-v2 layout, retained until the cutover removes it.
+`k8s/base/` + `k8s/overlays/<stage>/`: a namespace-/host-agnostic `base/` and thin per-stage overlays
+(`dev`/`test`/`uat`/`staging`/`prod`). The per-Product ApplicationSet syncs `k8s/overlays/<stage>`, sets the
+destination namespace, and patches the real host onto the `HTTPRoute`; each overlay pins the per-stage image
+digest (product-scoped `team-alpha/demo-web`).
