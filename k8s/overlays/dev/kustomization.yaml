@@ -9,4 +9,4 @@ replicas:
     count: 1
 images:
   - name: 829808296602.dkr.ecr.us-east-1.amazonaws.com/team-alpha/demo-web
-    newTag: placeholder # CI replaces with the signed digest at deploy (promote-by-PR, #377)
+    digest: sha256:5ab618fe03e22450f709f63e6e27c66d6aa0e94328ae2032c088c230b35328c7
